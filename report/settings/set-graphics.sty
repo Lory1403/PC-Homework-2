@@ -1,0 +1,52 @@
+\usepackage{
+    caption,
+    subcaption
+}
+\usepackage{multicol}
+
+\usepackage{graphicx}
+\usepackage{wrapfig}
+\usepackage{newfloat}
+\usepackage{float}
+\usepackage{booktabs}
+
+\DeclareFloatingEnvironment{plot}
+\DeclareFloatingEnvironment{float_equation}
+\DeclareCaptionType{cap_equation}[][]
+
+\graphicspath{%
+    {assets/images}%
+}
+
+\captionsetup{
+    figureposition = bottom,
+    tableposition = top,
+    font = small,
+    labelfont = {sf, bf},
+    justification = centering
+}
+
+\captionsetup[table]{
+    format = hang,
+    justification = raggedright,
+    singlelinecheck = off
+ }
+
+\captionsetup[figure]{
+    format = hang,
+    justification = raggedright,
+    singlelinecheck = off
+ }
+
+\captionsetup[subfigure]{
+    format = hang,
+    justification = centering,
+    singlelinecheck = off
+ }
+
+ \captionsetup[listing]{
+    format = hang,
+    justification = raggedright,
+    singlelinecheck = off
+ }
+ 

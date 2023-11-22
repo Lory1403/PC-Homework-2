@@ -1,0 +1,164 @@
+% $ biblatex auxiliary file $
+% $ biblatex bbl format version 3.2 $
+% Do not modify the above lines!
+%
+% This is an auxiliary file used by the 'biblatex' package.
+% This file may safely be deleted. It will be recreated by
+% biber as required.
+%
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+
+
+\refsection{0}
+  \datalist[entry]{nty/global//global/global}
+    \entry{arxiv_paper}{online}{}
+      \name{author}{1}{}{%
+        {{hash=aaeadd0b3ba8889a119d3ae095d6a1fa}{%
+           family={al.},
+           familyi={a\bibinitperiod},
+           given={Benjamin\bibnamedelima Michalowicz},
+           giveni={B\bibinitperiod\bibinitdelim M\bibinitperiod},
+           prefix={et},
+           prefixi={e\bibinitperiod}}}%
+      }
+      \strng{namehash}{aaeadd0b3ba8889a119d3ae095d6a1fa}
+      \strng{fullhash}{aaeadd0b3ba8889a119d3ae095d6a1fa}
+      \strng{bibnamehash}{aaeadd0b3ba8889a119d3ae095d6a1fa}
+      \strng{authorbibnamehash}{aaeadd0b3ba8889a119d3ae095d6a1fa}
+      \strng{authornamehash}{aaeadd0b3ba8889a119d3ae095d6a1fa}
+      \strng{authorfullhash}{aaeadd0b3ba8889a119d3ae095d6a1fa}
+      \field{sortinit}{a}
+      \field{sortinithash}{2f401846e2029bad6b3ecc16d50031e2}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{eprintclass}{cs.DC}
+      \field{eprinttype}{arXiv}
+      \field{title}{Efficient parallel algorithms for matrix-matrix multiplication}
+      \field{year}{2021}
+      \true{nocite}
+      \verb{eprint}
+      \verb 2107.10346
+      \endverb
+      \verb{urlraw}
+      \verb https://arxiv.org/pdf/2107.10346.pdf
+      \endverb
+      \verb{url}
+      \verb https://arxiv.org/pdf/2107.10346.pdf
+      \endverb
+    \endentry
+    \entry{https://doi.org/10.1002/cpe.5071}{article}{}
+      \name{author}{2}{}{%
+        {{hash=ec6cd95deab022fce7c257f0216e79a2}{%
+           family={Gustavson},
+           familyi={G\bibinitperiod},
+           given={Fred\bibnamedelima G.},
+           giveni={F\bibinitperiod\bibinitdelim G\bibinitperiod}}}%
+        {{hash=51cd2d8baecafadf3711ce7f4a6c5916}{%
+           family={Walker},
+           familyi={W\bibinitperiod},
+           given={David\bibnamedelima W.},
+           giveni={D\bibinitperiod\bibinitdelim W\bibinitperiod}}}%
+      }
+      \strng{namehash}{429be4363a08dcd3ba393c526dc4741f}
+      \strng{fullhash}{429be4363a08dcd3ba393c526dc4741f}
+      \strng{bibnamehash}{429be4363a08dcd3ba393c526dc4741f}
+      \strng{authorbibnamehash}{429be4363a08dcd3ba393c526dc4741f}
+      \strng{authornamehash}{429be4363a08dcd3ba393c526dc4741f}
+      \strng{authorfullhash}{429be4363a08dcd3ba393c526dc4741f}
+      \field{sortinit}{G}
+      \field{sortinithash}{32d67eca0634bf53703493fb1090a2e8}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Concurrency and Computation: Practice and Experience}
+      \field{note}{e5071 cpe.5071}
+      \field{number}{13}
+      \field{title}{Algorithms for in-place matrix transposition}
+      \field{volume}{31}
+      \field{year}{2019}
+      \true{nocite}
+      \field{pages}{e5071}
+      \range{pages}{-1}
+      \verb{doi}
+      \verb https://doi.org/10.1002/cpe.5071
+      \endverb
+      \verb{eprint}
+      \verb https://onlinelibrary.wiley.com/doi/pdf/10.1002/cpe.5071
+      \endverb
+      \verb{urlraw}
+      \verb https://onlinelibrary.wiley.com/doi/abs/10.1002/cpe.5071
+      \endverb
+      \verb{url}
+      \verb https://onlinelibrary.wiley.com/doi/abs/10.1002/cpe.5071
+      \endverb
+      \keyw{matrix,parallelism,performance,permutations,transpose}
+    \endentry
+    \entry{10.1145/3176364.3176374}{inproceedings}{}
+      \name{author}{4}{}{%
+        {{hash=c255b8d5c3324aba01a35b55806597f7}{%
+           family={Lim},
+           familyi={L\bibinitperiod},
+           given={Roktaek},
+           giveni={R\bibinitperiod}}}%
+        {{hash=e4bcc7274c38ee0a374ce0d59dedc86d}{%
+           family={Lee},
+           familyi={L\bibinitperiod},
+           given={Yeongha},
+           giveni={Y\bibinitperiod}}}%
+        {{hash=58ffbc0a6ae471a63f860d504a30e54d}{%
+           family={Kim},
+           familyi={K\bibinitperiod},
+           given={Raehyun},
+           giveni={R\bibinitperiod}}}%
+        {{hash=5c9502f1b9ab525a7da0d3083906209b}{%
+           family={Choi},
+           familyi={C\bibinitperiod},
+           given={Jaeyoung},
+           giveni={J\bibinitperiod}}}%
+      }
+      \list{location}{1}{%
+        {Chiyoda, Tokyo}%
+      }
+      \list{publisher}{1}{%
+        {Association for Computing Machinery}%
+      }
+      \strng{namehash}{17eb80a290a78789623c19df05497dc0}
+      \strng{fullhash}{aa07c883335674fb5cb6eca41abd9d79}
+      \strng{bibnamehash}{17eb80a290a78789623c19df05497dc0}
+      \strng{authorbibnamehash}{17eb80a290a78789623c19df05497dc0}
+      \strng{authornamehash}{17eb80a290a78789623c19df05497dc0}
+      \strng{authorfullhash}{aa07c883335674fb5cb6eca41abd9d79}
+      \field{sortinit}{L}
+      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{Proceedings of Workshops of HPC Asia}
+      \field{isbn}{9781450363471}
+      \field{series}{HPC Asia '18}
+      \field{title}{OpenMP-Based Parallel Implementation of Matrix-Matrix Multiplication on the Intel Knights Landing}
+      \field{year}{2018}
+      \true{nocite}
+      \field{pages}{63\bibrangedash 66}
+      \range{pages}{4}
+      \verb{doi}
+      \verb 10.1145/3176364.3176374
+      \endverb
+      \verb{urlraw}
+      \verb https://doi.org/10.1145/3176364.3176374
+      \endverb
+      \verb{url}
+      \verb https://doi.org/10.1145/3176364.3176374
+      \endverb
+      \keyw{high-performance,manycore,matrix-matrix multiplication,openMP affinity,knights landing}
+    \endentry
+  \enddatalist
+\endrefsection
+\endinput
+

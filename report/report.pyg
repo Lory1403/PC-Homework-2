@@ -1,0 +1,8 @@
+for (i = 0; i < rowsA; i++) {
+    for (j = 0; j < colsB; j++) {
+        C[i][j] = 0.0;
+        for (k = 0; k < rowsB; k++) {
+            C[i][j] += A[i][k] * B[k][j];
+        }
+    }
+}

@@ -1,0 +1,15 @@
+\usepackage[outputdir=build, newfloat]{minted}
+\usemintedstyle{manni}
+\setminted{
+    frame=lines,     %separa dal resto con linee
+    fontsize=\small, % dimensione del testo
+    tabsize=4,       % spazi invece che tab
+}
+
+% puoi cambiare il linguaggio (c, cpp, ecc)s 
+\setminted[c]{
+    linenos=false
+}
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
+\SetupFloatingEnvironment{listing}{name=Source code}

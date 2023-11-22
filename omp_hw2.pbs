@@ -1,0 +1,37 @@
+#!/bin/bash
+# Job name
+#PBS -N hw2-pt1
+# Output files
+#PBS -o ./hw2.o
+#PBS -e ./hw2.e
+# Queue name
+#PBS -q short_cpuQ
+# Number of nodes, cpus, threads and amount of memory
+#PBS -l select=1:ncpus=64:ompthreads=64
+set -e
+# Modules for C
+module load gcc91
+
+g++() {
+    g++-9.1.0 "$@"
+}
+
+g++ --version
+
+gcc() {
+    gcc-9.1.0 "$@"
+}
+gcc --version
+
+# To check the architecture
+lscpu
+
+# Select the working directory
+cd /home/lorenzo.fasol/HW2
+
+# The code should be compiled before running the code
+gcc -fopenmp hw2_pt1.c -o hw2_pt1.out
+gcc -fopenmp hw2_pt2.c -o hw2_pt2.out
+
+./hw2_pt1.out
+./hw2_pt2.out

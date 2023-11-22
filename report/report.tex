@@ -1,0 +1,1868 @@
+% arara: pdflatex: { draft: yes, shell: yes, options: [--output-directory=build] }
+
+% arara: biber: { options: [ '--output-directory=build' ] }
+% arara: --> if missing(toFile('build/report.bbl')) || changed(toFile('build/report.bbl')) || found(toFile('build/report.log'), 'Citation')
+
+%! arara: makeglossaries: { options: [ '-d', 'build' ] }
+%! arara: --> if changed (toFile('build/report.glo')) || missing (toFile('build/report.gls'))
+
+% arara: pdflatex: { shell: yes, synctex: yes, options: [--output-directory=build] }
+
+\documentclass{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+\usepackage{settings/set-color}
+\usepackage{settings/set-geometry}
+\usepackage{settings/set-lists}
+\usepackage{settings/set-graphics}
+\usepackage{settings/set-tables}
+\usepackage{settings/set-spacing}
+\usepackage{settings/set-code}
+\usepackage{settings/set-plots}
+\usepackage{settings/set-bibliography}
+\usepackage{subcaption} % Added for \subcaptionbox
+
+\setlength{\multicolsep}{0pt}
+\setlength{\abovecaptionskip}{5pt}
+
+\begin{document}
+
+\title{Introduction to Parallel Computing\\
+    Homework 2: Parallelizing matrix operations using OpenMP.\\
+    \textbf{Results report}
+}
+\author{Lorenzo Fasol\\lorenzo.fasol@studenti.unitn.it\\227561\\https://github.com/Lory1403/PC-Homework-2}
+\date{a.y. 2023/2024}
+\maketitle
+
+This report addresses the implementation and performance analysis of parallel matrix multiplication and transposition using OpenMP. Matrix operations are fundamental in various scientific and computational domains, and efficient parallelization is crucial for handling large datasets.\\
+All the test are conducted in the HPC cluster (GCC 9.1.0 with OpenMP 3.2.1) equipped with a Intel(R) Xeon(R) Gold 6140M CPU @ 2.30GHz.
+
+\section{Parallel matrix multiplication}
+This first task of the assignment entails the implementation of matrix multiplication, a foundational operation in linear algebra. The primary objective is to efficiently compute the product of two matrices. The exploration of diverse OpenMP directives is undertaken with the explicit purpose of enhancing computational performance.\\
+In my implementation, I opted to design two distinct algorithms, matMul and a parallel version matMulPar, capable of handling both squared and non-squared matrices.
+
+\subsection*{Serial implementation}
+\texttt{Source code~\ref{code:serial_multiplication}} presents a fundamental serial implementation of matrix multiplication. The algorithm employs a triple loop structure to iterate over the rows of the first matrix, the columns of the second matrix, and the columns of the first matrix. Despite its simplicity and intuitiveness, this implementation exhibits inefficiencies. Its time complexity is characterized by O($2*n^3$) due to the multiplications and additions, while the space complexity is O($n^2$) owing to the size of matrix C.\\
+A more sophisticated implementation is presented in \texttt{Source code~\ref{code:serial_optimized_multiplication}}. This optimized version strategically interchanges the order of the j and k loops, resulting in a reduction in cache misses and an improvement in data locality. These optimizations contribute to enhanced overall performance.
+
+\begin{multicols}{2}
+    \begin{code}
+        \caption{\label{code:serial_multiplication}Serial nested loops matrix multiplication}
+        \begin{minted}{c}
+for (i = 0; i < rowsA; i++) {
+    for (j = 0; j < colsB; j++) {
+        C[i][j] = 0.0;
+        for (k = 0; k < rowsB; k++) {
+            C[i][j] += A[i][k] * B[k][j];
+        }
+    }
+}
+        \end{minted}
+    \end{code}
+
+    \columnbreak
+
+    \begin{code}
+        \caption{\label{code:serial_optimized_multiplication}Optimized serial matrix multiplication}
+        \begin{minted}{c}
+for (i = 0; i < rowsA; i++) {
+    for (k = 0; k < rowsB; k++) {
+        for (j = 0; j < colsB; j++) {
+            if (k == 0) C[i][j] = 0.0;
+            C[i][j] += A[i][k] * B[k][j];
+        }
+    }
+}
+        \end{minted}
+    \end{code}
+\end{multicols}
+
+In an attempt to optimize matrix multiplication performance, the blocking or loop tiling technique was tested. This strategy involves partitioning large matrices into smaller blocks or tiles to enhance cache utilization and reduce cache misses as in the prior implementation.
+However, despite the theoretical advantages of this technique, the empirical results did not yield an improvement.
+
+\subsection*{Parallel implementation}
+\texttt{Source code~\ref{code:parallel_multiplication}} presents a parallel implementation of matrix multiplication. The algorithm is similar to the serial version, but it employs OpenMP directives to parallelize the outermost loop.
+
+The provided code employs OpenMP directives to parallelize the computation of the matrix product C resulting from the multiplication of matrices A and B. These directives include the following:
+\begin{itemize}
+    \item \texttt{\#pragma omp parallel for}: this pragma directive initiates a parallel loop, distributing the computational workload across multiple threads
+    \item \texttt{shared(A, B, C)}: the shared clause indicates that matrices A, B, and C are shared among the threads
+    \item \texttt{reduction(+:sum)}: the reduction clause designates the variable \texttt{sum} as a reduction variable, ensuring that each thread maintains its local copy of the variable. These local copies are later aggregated using addition to compute the final result
+    \item \texttt{collapse(2)}: the collapse clause collapses the nested loops into a single loop
+    \item \texttt{\#pragma omp simd}: this pragma directive in the innermost loop employs Single Instruction, Multiple Data (SIMD) parallelism to further enhance vectorization and exploit parallelism at the instruction level
+\end{itemize}
+Within the loop, each element \texttt{C[i][j]} is computed as the sum of products of corresponding elements from row i of matrix A and column j of matrix B.\\
+
+\begin{code}
+    \caption{\label{code:parallel_multiplication}Parallel nested loops matrix multiplication}
+    \begin{minted}{c}
+float sum;
+#pragma omp parallel for shared(A, B, C) reduction(+:sum) collapse(2)
+for (int i = 0; i < rowsA; i++) {
+    for (int j = 0; j < colsB; j++) {
+        sum = 0.0;
+        #pragma omp simd 
+        for (int k = 0; k < colsA; k++) {
+            sum += A[i][k] * B[k][j];
+        }
+        C[i][j] = sum;
+    }
+}
+    \end{minted}
+\end{code}
+
+\subsection*{Results analysis}
+
+The design of the serial code did not facilitate a direct comparison with its parallel counterpart due to the optimization that I adopted. To facilitate a thorough analysis of results, it is essential to establish a basis for comparison. To ensure a fair comparison, the parallel code was intentionally executed with a single thread, thereby obtaining serial results for meaningful analysis.\\
+The result of the tests are presented in the following graphs. The graphs illustrate the GFLOPS, the speedup and the efficiency for both sparse and dense matrices.
+\begin{equation}
+    \label{eq:flops}
+    \textnormal{FLOPS}=\frac{%
+            2 \cdot \textnormal{A rows} \cdot \textnormal{A columns} \cdot %
+            \textnormal{B columns}
+        }{\textnormal{execution time}}=
+        \frac{%
+            2 \cdot \textnormal{size}^3}{\textnormal{execution time}}
+\end{equation}
+
+Plots clearly illustrate that execution achieves better performance as it harnesses more CPUs. This improvement is attributed to the higher number of operations executed per second. Similarly, the speedup plot shows a direct correlation: more CPUs lead to faster calculations.
+
+In the efficiency graph, noticeable spikes are observed. These spikes result from the inherent nonlinear scalability of parallel systems. When scaling up the problem, a trade-off must be made between maintaining a constant run time or a constant efficiency.
+
+
+
+\clearpage
+
+%GFLOPS matrix multiplication
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={GFLOPS},
+                legend style={at={(0.5,-0.15)}, anchor=north},
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                legend pos=north west,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 500
+            \addplot table [x=Threads_num, y=GFLOPS_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                500;1;0.476471;0.524691;1.000000;100.000000;0.502003;0.498005;1.000000;100.000000
+                500;2;0.386759;0.646398;1.231958;61.597920;0.263361;0.949267;1.906140;95.307012
+                500;4;0.129242;1.934362;3.686658;92.166440;0.139082;1.797502;3.609403;90.235077
+                500;8;0.066083;3.783143;7.210190;90.127378;0.063702;3.924495;7.880490;98.506130
+                500;16;0.040077;6.237963;11.888889;74.305556;0.032124;7.782443;15.627039;97.668994
+                500;32;0.024733;10.107789;19.264586;60.201831;0.016180;15.451091;31.026143;96.956698
+                500;64;0.010484;23.846490;45.447444;71.011631;0.008081;30.937463;62.121396;97.064681
+            };
+            \addlegendentryexpanded{500}
+    
+            % Dimension 1000
+            \addplot table [x=Threads_num, y=GFLOPS_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                1000;1;5.357345;0.373319;1.000000;100.000000;4.493901;0.445048;1.000000;100.000000
+                1000;2;2.738126;0.730427;1.956574;97.828679;2.243545;0.891446;2.003036;100.151791
+                1000;4;1.342043;1.490265;3.991932;99.798311;1.132803;1.765532;3.967063;99.176578
+                1000;8;0.683454;2.926310;7.838633;97.982911;0.572014;3.496418;7.856278;98.203475
+                1000;16;0.359368;5.565326;14.907685;93.173032;0.299309;6.682056;15.014253;93.839080
+                1000;32;0.199986;10.000703;26.788600;83.714376;0.140212;14.264096;32.050759;100.158621
+                1000;64;0.135772;14.730544;39.458393;61.653740;0.070924;28.199243;63.362205;99.003445
+            };
+            \addlegendentryexpanded{1000}
+    
+            % Dimension 2000
+            \addplot table [x=Threads_num, y=GFLOPS_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                2000;1;35.711653;0.448033;1.000000;100.000000;43.562821;0.367286;1.000000;100.000000
+                2000;2;18.846642;0.848958;1.894855;94.742748;28.370679;0.563963;1.535487;76.774372
+                2000;4;9.597469;1.667106;3.720945;93.023622;10.083263;1.586788;4.320310;108.007748
+                2000;8;4.916110;3.254606;7.264210;90.802619;5.065597;3.158562;8.599741;107.496760
+                2000;16;2.674297;5.982881;13.353660;83.460375;2.540204;6.298706;17.149340;107.183372
+                2000;32;1.442066;11.095193;24.764229;77.388216;1.330704;12.023715;32.736672;102.302101
+                2000;64;0.925721;17.283829;48.087042;75.136004;0.905916;17.661681;48.087042;75.136004
+            };
+            \addlegendentryexpanded{2000}
+    
+            % Dimension 4000
+            \addplot table [x=Threads_num, y=GFLOPS_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                4000;1;556.725220;0.229916;1.000000;100.000000;536.013236;0.238800;1.000000;100.000000
+                4000;2;302.319330;0.423393;1.841514;92.075690;248.298123;0.515509;2.158749;107.937432
+                4000;4;163.636083;0.782224;3.402216;85.055388;126.391029;1.012730;4.240912;106.022801
+                4000;8;83.774800;1.527906;6.645497;97.460896;68.747218;1.861894;7.796872;97.460896
+                4000;16;35.309276;3.625110;15.767109;98.544434;36.863606;3.472259;14.540445;90.877781
+                4000;32;18.179423;7.040928;30.623921;95.699754;19.285557;6.637091;27.793506;86.854705
+                4000;64;10.219334;12.525278;54.477642;85.121316;11.586069;11.047750;46.263598;72.286872
+            };
+            \addlegendentryexpanded{4000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{GFLOPS for Sparse Matrices}
+        \label{fig:gflops_sparse}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={GFLOPS},
+                legend style={at={(0.5,-0.15)}, anchor=north},
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                legend pos=north west,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 500
+            \addplot table [x=Threads_num, y=GFLOPS_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                500;1;0.476471;0.524691;1.000000;100.000000;0.502003;0.498005;1.000000;100.000000
+                500;2;0.386759;0.646398;1.231958;61.597920;0.263361;0.949267;1.906140;95.307012
+                500;4;0.129242;1.934362;3.686658;92.166440;0.139082;1.797502;3.609403;90.235077
+                500;8;0.066083;3.783143;7.210190;90.127378;0.063702;3.924495;7.880490;98.506130
+                500;16;0.040077;6.237963;11.888889;74.305556;0.032124;7.782443;15.627039;97.668994
+                500;32;0.024733;10.107789;19.264586;60.201831;0.016180;15.451091;31.026143;96.956698
+                500;64;0.010484;23.846490;45.447444;71.011631;0.008081;30.937463;62.121396;97.064681
+            };
+            \addlegendentryexpanded{500}
+    
+            % Dimension 1000
+            \addplot table [x=Threads_num, y=GFLOPS_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                1000;1;5.357345;0.373319;1.000000;100.000000;4.493901;0.445048;1.000000;100.000000
+                1000;2;2.738126;0.730427;1.956574;97.828679;2.243545;0.891446;2.003036;100.151791
+                1000;4;1.342043;1.490265;3.991932;99.798311;1.132803;1.765532;3.967063;99.176578
+                1000;8;0.683454;2.926310;7.838633;97.982911;0.572014;3.496418;7.856278;98.203475
+                1000;16;0.359368;5.565326;14.907685;93.173032;0.299309;6.682056;15.014253;93.839080
+                1000;32;0.199986;10.000703;26.788600;83.714376;0.140212;14.264096;32.050759;100.158621
+                1000;64;0.135772;14.730544;39.458393;61.653740;0.070924;28.199243;63.362205;99.003445
+            };
+            \addlegendentryexpanded{1000}
+    
+            % Dimension 2000
+            \addplot table [x=Threads_num, y=GFLOPS_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                2000;1;35.711653;0.448033;1.000000;100.000000;43.562821;0.367286;1.000000;100.000000
+                2000;2;18.846642;0.848958;1.894855;94.742748;28.370679;0.563963;1.535487;76.774372
+                2000;4;9.597469;1.667106;3.720945;93.023622;10.083263;1.586788;4.320310;108.007748
+                2000;8;4.916110;3.254606;7.264210;90.802619;5.065597;3.158562;8.599741;107.496760
+                2000;16;2.674297;5.982881;13.353660;83.460375;2.540204;6.298706;17.149340;107.183372
+                2000;32;1.442066;11.095193;24.764229;77.388216;1.330704;12.023715;32.736672;102.302101
+                2000;64;0.925721;17.283829;48.087042;75.136004;0.905916;17.661681;48.087042;75.136004
+            };
+            \addlegendentryexpanded{2000}
+    
+            % Dimension 4000
+            \addplot table [x=Threads_num, y=GFLOPS_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                4000;1;556.725220;0.229916;1.000000;100.000000;536.013236;0.238800;1.000000;100.000000
+                4000;2;302.319330;0.423393;1.841514;92.075690;248.298123;0.515509;2.158749;107.937432
+                4000;4;163.636083;0.782224;3.402216;85.055388;126.391029;1.012730;4.240912;106.022801
+                4000;8;83.774800;1.527906;6.645497;97.460896;68.747218;1.861894;7.796872;97.460896
+                4000;16;35.309276;3.625110;15.767109;98.544434;36.863606;3.472259;14.540445;90.877781
+                4000;32;18.179423;7.040928;30.623921;95.699754;19.285557;6.637091;27.793506;86.854705
+                4000;64;10.219334;12.525278;54.477642;85.121316;11.586069;11.047750;46.263598;72.286872
+            };
+            \addlegendentryexpanded{4000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{GFLOPS for Dense Matrices}
+        \label{fig:gflops_dense}
+    \end{subfigure}
+\end{figure}
+
+%SpeedUp matrix multiplication
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Speedup},
+                legend style={at={(0.5,-0.15)}, anchor=north},
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                legend pos=north west,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 500
+            \addplot table [x=Threads_num, y=Speedup_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                500;1;0.476471;0.524691;1.000000;100.000000;0.502003;0.498005;1.000000;100.000000
+                500;2;0.386759;0.646398;1.231958;61.597920;0.263361;0.949267;1.906140;95.307012
+                500;4;0.129242;1.934362;3.686658;92.166440;0.139082;1.797502;3.609403;90.235077
+                500;8;0.066083;3.783143;7.210190;90.127378;0.063702;3.924495;7.880490;98.506130
+                500;16;0.040077;6.237963;11.888889;74.305556;0.032124;7.782443;15.627039;97.668994
+                500;32;0.024733;10.107789;19.264586;60.201831;0.016180;15.451091;31.026143;96.956698
+                500;64;0.010484;23.846490;45.447444;71.011631;0.008081;30.937463;62.121396;97.064681
+            };
+            \addlegendentryexpanded{500}
+    
+            % Dimension 1000
+            \addplot table [x=Threads_num, y=Speedup_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                1000;1;5.357345;0.373319;1.000000;100.000000;4.493901;0.445048;1.000000;100.000000
+                1000;2;2.738126;0.730427;1.956574;97.828679;2.243545;0.891446;2.003036;100.151791
+                1000;4;1.342043;1.490265;3.991932;99.798311;1.132803;1.765532;3.967063;99.176578
+                1000;8;0.683454;2.926310;7.838633;97.982911;0.572014;3.496418;7.856278;98.203475
+                1000;16;0.359368;5.565326;14.907685;93.173032;0.299309;6.682056;15.014253;93.839080
+                1000;32;0.199986;10.000703;26.788600;83.714376;0.140212;14.264096;32.050759;100.158621
+                1000;64;0.135772;14.730544;39.458393;61.653740;0.070924;28.199243;63.362205;99.003445
+            };
+            \addlegendentryexpanded{1000}
+    
+            % Dimension 2000
+            \addplot table [x=Threads_num, y=Speedup_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                2000;1;35.711653;0.448033;1.000000;100.000000;43.562821;0.367286;1.000000;100.000000
+                2000;2;18.846642;0.848958;1.894855;94.742748;28.370679;0.563963;1.535487;76.774372
+                2000;4;9.597469;1.667106;3.720945;93.023622;10.083263;1.586788;4.320310;108.007748
+                2000;8;4.916110;3.254606;7.264210;90.802619;5.065597;3.158562;8.599741;107.496760
+                2000;16;2.674297;5.982881;13.353660;83.460375;2.540204;6.298706;17.149340;107.183372
+                2000;32;1.442066;11.095193;24.764229;77.388216;1.330704;12.023715;32.736672;102.302101
+                2000;64;0.925721;17.283829;48.087042;75.136004;0.905916;17.661681;48.087042;75.136004
+            };
+            \addlegendentryexpanded{2000}
+    
+            % Dimension 4000
+            \addplot table [x=Threads_num, y=Speedup_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                4000;1;556.725220;0.229916;1.000000;100.000000;536.013236;0.238800;1.000000;100.000000
+                4000;2;302.319330;0.423393;1.841514;92.075690;248.298123;0.515509;2.158749;107.937432
+                4000;4;163.636083;0.782224;3.402216;85.055388;126.391029;1.012730;4.240912;106.022801
+                4000;8;83.774800;1.527906;6.645497;97.460896;68.747218;1.861894;7.796872;97.460896
+                4000;16;35.309276;3.625110;15.767109;98.544434;36.863606;3.472259;14.540445;90.877781
+                4000;32;18.179423;7.040928;30.623921;95.699754;19.285557;6.637091;27.793506;86.854705
+                4000;64;10.219334;12.525278;54.477642;85.121316;11.586069;11.047750;46.263598;72.286872
+            };
+            \addlegendentryexpanded{4000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Speedup for Sparse Matrices}
+        \label{fig:speedup_sparse}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Speedup},
+                legend style={at={(0.5,-0.15)}, anchor=north},
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                legend pos=north west,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 500
+            \addplot table [x=Threads_num, y=Speedup_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                500;1;0.476471;0.524691;1.000000;100.000000;0.502003;0.498005;1.000000;100.000000
+                500;2;0.386759;0.646398;1.231958;61.597920;0.263361;0.949267;1.906140;95.307012
+                500;4;0.129242;1.934362;3.686658;92.166440;0.139082;1.797502;3.609403;90.235077
+                500;8;0.066083;3.783143;7.210190;90.127378;0.063702;3.924495;7.880490;98.506130
+                500;16;0.040077;6.237963;11.888889;74.305556;0.032124;7.782443;15.627039;97.668994
+                500;32;0.024733;10.107789;19.264586;60.201831;0.016180;15.451091;31.026143;96.956698
+                500;64;0.010484;23.846490;45.447444;71.011631;0.008081;30.937463;62.121396;97.064681
+            };
+            \addlegendentryexpanded{500}
+    
+            % Dimension 1000
+            \addplot table [x=Threads_num, y=Speedup_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                1000;1;5.357345;0.373319;1.000000;100.000000;4.493901;0.445048;1.000000;100.000000
+                1000;2;2.738126;0.730427;1.956574;97.828679;2.243545;0.891446;2.003036;100.151791
+                1000;4;1.342043;1.490265;3.991932;99.798311;1.132803;1.765532;3.967063;99.176578
+                1000;8;0.683454;2.926310;7.838633;97.982911;0.572014;3.496418;7.856278;98.203475
+                1000;16;0.359368;5.565326;14.907685;93.173032;0.299309;6.682056;15.014253;93.839080
+                1000;32;0.199986;10.000703;26.788600;83.714376;0.140212;14.264096;32.050759;100.158621
+                1000;64;0.135772;14.730544;39.458393;61.653740;0.070924;28.199243;63.362205;99.003445
+            };
+            \addlegendentryexpanded{1000}
+    
+            % Dimension 2000
+            \addplot table [x=Threads_num, y=Speedup_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                2000;1;35.711653;0.448033;1.000000;100.000000;43.562821;0.367286;1.000000;100.000000
+                2000;2;18.846642;0.848958;1.894855;94.742748;28.370679;0.563963;1.535487;76.774372
+                2000;4;9.597469;1.667106;3.720945;93.023622;10.083263;1.586788;4.320310;108.007748
+                2000;8;4.916110;3.254606;7.264210;90.802619;5.065597;3.158562;8.599741;107.496760
+                2000;16;2.674297;5.982881;13.353660;83.460375;2.540204;6.298706;17.149340;107.183372
+                2000;32;1.442066;11.095193;24.764229;77.388216;1.330704;12.023715;32.736672;102.302101
+                2000;64;0.925721;17.283829;48.087042;75.136004;0.905916;17.661681;48.087042;75.136004
+            };
+            \addlegendentryexpanded{2000}
+    
+            % Dimension 4000
+            \addplot table [x=Threads_num, y=Speedup_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                4000;1;556.725220;0.229916;1.000000;100.000000;536.013236;0.238800;1.000000;100.000000
+                4000;2;302.319330;0.423393;1.841514;92.075690;248.298123;0.515509;2.158749;107.937432
+                4000;4;163.636083;0.782224;3.402216;85.055388;126.391029;1.012730;4.240912;106.022801
+                4000;8;83.774800;1.527906;6.645497;97.460896;68.747218;1.861894;7.796872;97.460896
+                4000;16;35.309276;3.625110;15.767109;98.544434;36.863606;3.472259;14.540445;90.877781
+                4000;32;18.179423;7.040928;30.623921;95.699754;19.285557;6.637091;27.793506;86.854705
+                4000;64;10.219334;12.525278;54.477642;85.121316;11.586069;11.047750;46.263598;72.286872
+            };
+            \addlegendentryexpanded{4000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Speedup for Dense Matrices}
+        \label{fig:gflops_dense}
+    \end{subfigure}
+\end{figure}
+
+%Efficiency matrix multiplication
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Efficiency [\%]},
+                legend style={at={(0.45,0.1)}, anchor=south},
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 500
+            \addplot table [x=Threads_num, y=Efficiency_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                500;1;0.476471;0.524691;1.000000;100.000000;0.502003;0.498005;1.000000;100.000000
+                500;2;0.386759;0.646398;1.231958;61.597920;0.263361;0.949267;1.906140;95.307012
+                500;4;0.129242;1.934362;3.686658;92.166440;0.139082;1.797502;3.609403;90.235077
+                500;8;0.066083;3.783143;7.210190;90.127378;0.063702;3.924495;7.880490;98.506130
+                500;16;0.040077;6.237963;11.888889;74.305556;0.032124;7.782443;15.627039;97.668994
+                500;32;0.024733;10.107789;19.264586;60.201831;0.016180;15.451091;31.026143;96.956698
+                500;64;0.010484;23.846490;45.447444;71.011631;0.008081;30.937463;62.121396;97.064681
+            };
+            \addlegendentryexpanded{500}
+    
+            % Dimension 1000
+            \addplot table [x=Threads_num, y=Efficiency_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                1000;1;5.357345;0.373319;1.000000;100.000000;4.493901;0.445048;1.000000;100.000000
+                1000;2;2.738126;0.730427;1.956574;97.828679;2.243545;0.891446;2.003036;100.151791
+                1000;4;1.342043;1.490265;3.991932;99.798311;1.132803;1.765532;3.967063;99.176578
+                1000;8;0.683454;2.926310;7.838633;97.982911;0.572014;3.496418;7.856278;98.203475
+                1000;16;0.359368;5.565326;14.907685;93.173032;0.299309;6.682056;15.014253;93.839080
+                1000;32;0.199986;10.000703;26.788600;83.714376;0.140212;14.264096;32.050759;100.158621
+                1000;64;0.135772;14.730544;39.458393;61.653740;0.070924;28.199243;63.362205;99.003445
+            };
+            \addlegendentryexpanded{1000}
+    
+            % Dimension 2000
+            \addplot table [x=Threads_num, y=Efficiency_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                2000;1;35.711653;0.448033;1.000000;100.000000;43.562821;0.367286;1.000000;100.000000
+                2000;2;18.846642;0.848958;1.894855;94.742748;28.370679;0.563963;1.535487;76.774372
+                2000;4;9.597469;1.667106;3.720945;93.023622;10.083263;1.586788;4.320310;108.007748
+                2000;8;4.916110;3.254606;7.264210;90.802619;5.065597;3.158562;8.599741;107.496760
+                2000;16;2.674297;5.982881;13.353660;83.460375;2.540204;6.298706;17.149340;107.183372
+                2000;32;1.442066;11.095193;24.764229;77.388216;1.330704;12.023715;32.736672;102.302101
+                2000;64;0.925721;17.283829;48.087042;75.136004;0.905916;17.661681;48.087042;75.136004
+            };
+            \addlegendentryexpanded{2000}
+    
+            % Dimension 4000
+            \addplot table [x=Threads_num, y=Efficiency_sparse, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                4000;1;556.725220;0.229916;1.000000;100.000000;536.013236;0.238800;1.000000;100.000000
+                4000;2;302.319330;0.423393;1.841514;92.075690;248.298123;0.515509;2.158749;107.937432
+                4000;4;163.636083;0.782224;3.402216;85.055388;126.391029;1.012730;4.240912;106.022801
+                4000;8;83.774800;1.527906;6.645497;97.460896;68.747218;1.861894;7.796872;97.460896
+                4000;16;35.309276;3.625110;15.767109;98.544434;36.863606;3.472259;14.540445;90.877781
+                4000;32;18.179423;7.040928;30.623921;95.699754;19.285557;6.637091;27.793506;86.854705
+                4000;64;10.219334;12.525278;54.477642;85.121316;11.586069;11.047750;46.263598;72.286872
+            };
+            \addlegendentryexpanded{4000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Efficiency for Sparse Matrices}
+        \label{fig:efficiency_sparse}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Efficiency [\%]},
+                legend style={at={(0.5,0.1)}, anchor=south},
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 500
+            \addplot table [x=Threads_num, y=Efficiency_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                500;1;0.476471;0.524691;1.000000;100.000000;0.502003;0.498005;1.000000;100.000000
+                500;2;0.386759;0.646398;1.231958;61.597920;0.263361;0.949267;1.906140;95.307012
+                500;4;0.129242;1.934362;3.686658;92.166440;0.139082;1.797502;3.609403;90.235077
+                500;8;0.066083;3.783143;7.210190;90.127378;0.063702;3.924495;7.880490;98.506130
+                500;16;0.040077;6.237963;11.888889;74.305556;0.032124;7.782443;15.627039;97.668994
+                500;32;0.024733;10.107789;19.264586;60.201831;0.016180;15.451091;31.026143;96.956698
+                500;64;0.010484;23.846490;45.447444;71.011631;0.008081;30.937463;62.121396;97.064681
+            };
+            \addlegendentryexpanded{500}
+    
+            % Dimension 1000
+            \addplot table [x=Threads_num, y=Efficiency_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                1000;1;5.357345;0.373319;1.000000;100.000000;4.493901;0.445048;1.000000;100.000000
+                1000;2;2.738126;0.730427;1.956574;97.828679;2.243545;0.891446;2.003036;100.151791
+                1000;4;1.342043;1.490265;3.991932;99.798311;1.132803;1.765532;3.967063;99.176578
+                1000;8;0.683454;2.926310;7.838633;97.982911;0.572014;3.496418;7.856278;98.203475
+                1000;16;0.359368;5.565326;14.907685;93.173032;0.299309;6.682056;15.014253;93.839080
+                1000;32;0.199986;10.000703;26.788600;83.714376;0.140212;14.264096;32.050759;100.158621
+                1000;64;0.135772;14.730544;39.458393;61.653740;0.070924;28.199243;63.362205;99.003445
+            };
+            \addlegendentryexpanded{1000}
+    
+            % Dimension 2000
+            \addplot table [x=Threads_num, y=Efficiency_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                2000;1;35.711653;0.448033;1.000000;100.000000;43.562821;0.367286;1.000000;100.000000
+                2000;2;18.846642;0.848958;1.894855;94.742748;28.370679;0.563963;1.535487;76.774372
+                2000;4;9.597469;1.667106;3.720945;93.023622;10.083263;1.586788;4.320310;108.007748
+                2000;8;4.916110;3.254606;7.264210;90.802619;5.065597;3.158562;8.599741;107.496760
+                2000;16;2.674297;5.982881;13.353660;83.460375;2.540204;6.298706;17.149340;107.183372
+                2000;32;1.442066;11.095193;24.764229;77.388216;1.330704;12.023715;32.736672;102.302101
+                2000;64;0.925721;17.283829;48.087042;75.136004;0.905916;17.661681;48.087042;75.136004
+            };
+            \addlegendentryexpanded{2000}
+    
+            % Dimension 4000
+            \addplot table [x=Threads_num, y=Efficiency_dense, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed_time_sparse;GFLOPS_sparse;Speedup_sparse;Efficiency_sparse;Elapsed_time_dense;GFLOPS_dense;Speedup_dense;Efficiency_dense
+                4000;1;556.725220;0.229916;1.000000;100.000000;536.013236;0.238800;1.000000;100.000000
+                4000;2;302.319330;0.423393;1.841514;92.075690;248.298123;0.515509;2.158749;107.937432
+                4000;4;163.636083;0.782224;3.402216;85.055388;126.391029;1.012730;4.240912;106.022801
+                4000;8;83.774800;1.527906;6.645497;97.460896;68.747218;1.861894;7.796872;97.460896
+                4000;16;35.309276;3.625110;15.767109;98.544434;36.863606;3.472259;14.540445;90.877781
+                4000;32;18.179423;7.040928;30.623921;95.699754;19.285557;6.637091;27.793506;86.854705
+                4000;64;10.219334;12.525278;54.477642;85.121316;11.586069;11.047750;46.263598;72.286872
+            };
+            \addlegendentryexpanded{4000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Efficiency for Dense Matrices}
+        \label{fig:Efficiency_dense}
+    \end{subfigure}
+\end{figure}
+
+\clearpage
+
+\textbf{Potential Bottlenecks and Optimizations:}
+
+\begin{itemize}
+    \item \textbf{Cache Usage:} Cache misses can be a significant bottleneck. Strategies such as loop tiling or blocking, as previously discussed, can enhance cache locality.
+    \item \textbf{Memory Access Patterns:} Irregular memory access patterns can lead to poor performance. Optimizations like loop reordering to improve data locality and diminish cache misses, for instance, through loop interchange or unrolling, are effective measures.
+    \item \textbf{Floating-Point Arithmetic:} Floating-point operations can be a bottleneck in some systems. Hardware-specific optimizations can be taken into account, such as SIMD (Single Instruction, Multiple Data) instructions.
+    \item \textbf{Algorithmic Optimizations:} Incorporating advanced algorithms, such as Strassen’s algorithm (reducing the number of multiplications required) or the Coppersmith-Winograd algorithm (optimized for large matrices), can yield notable performance improvements.
+\end{itemize}
+
+
+\textbf{Differences between Parallel Algorithms for Dense and Sparse Matrices:}\\
+Setting aside the obvious differences in data structure, parallel algorithms for dense and sparse matrices differ in terms of parallelism, complexity, optimizations, and sparsity considerations.\\
+In dense matrices, achieving parallelism is often uncomplicated, employing techniques like loop-level parallelism (e.g., OpenMP). Contrarily, sparse matrices pose a challenge due to their irregular data structures, necessitating the use of specialized algorithms.\\
+Parallel algorithms for sparse matrices tend to be more complex, involving dynamic load balancing, data partitioning, and addressing communication overhead.
+In the context of dense matrices, the focus lies on optimizing cache usage and exploiting SIMD instructions. 
+In contrast, sparse matrix parallelism centers on the efficient manipulation of data structures.\\
+Parallel algorithms for sparse matrices must also consider the specific sparsity pattern. The sparsity pattern affects parallelism and load balancing. Some parallel algorithms might perform well with specific sparsity patterns while struggling with others.
+
+In summary, while parallelization is valuable for both dense and sparse matrices, the approaches and challenges differ significantly due to the inherent differences in data structure and complexity.
+\clearpage
+\section{Parallel matrix transposition}
+
+The code produced for this task performs transposition operations on matrices, both in serial and parallel fashion using OpenMP directives. It includes functionality for transposing matrices and measuring the elapsed time for various scenarios, such as different matrix dimensions, thread counts, and block sizes for block transposition. The matrices can be also initialized in a dense or sparse fashion.
+
+\subsection*{Serial and parallel matrix transpose implementation}
+
+\begin{code}
+    \caption{\label{code:serial-parallel-transpose}}
+    \begin{minted}{c}
+#pragma omp parallel for collapse(2) // Row for parallel version
+for (int i = 0; i < cols; i++)
+    for (int j = 0; j < rows; j++)
+        TA[i][j] = A[j][i];
+    \end{minted}
+\end{code}
+
+The serial code for the transposition is a simple nested loop that iterates over rows and columns of the matrix and swaps the elements.
+The iteration over the columns was prioritized due to the observed enhanced performance in maintaining cache-friendliness with the transposed matrix (TA) compared to the original matrix (A).
+
+\subsection*{Serial and parallel block matrix transpose implementation}
+
+Three principal solutions have been explored for an optimal block transposition implementation.\\
+\texttt{Source code~\ref{code:matBlockT1}} represents the least efficient approach. It incorporates unnecessary index calculations, resulting in decreased efficiency due to redundant computations.\\
+\texttt{Source code~\ref{code:matBlockT2}} and \texttt{Source code~\ref{code:matBlockT3}} exhibit similar structures. In an attempt to enhance data locality, I experimented with the order of loops. Despite replicating the logic applied in previous tasks, these variations did not yield any optimizations.
+
+\begin{code}
+    \caption{\label{code:matBlockT1}Matrix transposition with blocks - First implementation}
+    \begin{minted}{c}
+for (int i = 0; i < num_col_blocks; i++)
+  for (int j = 0; j < num_row_blocks; j++)
+    for (int bi = 0; bi < block_size; bi++)
+      for (int bj = 0; bj < block_size; bj++)
+        TA[i * block_size + bi][j * block_size + bj] = A[j * block_size + bj][i * block_size + bi];    
+    \end{minted}
+\end{code}
+
+\begin{multicols}{2}
+    \begin{code}
+        \caption{\label{code:matBlockT2}Matrix transposition with blocks - Second implementation}
+        \begin{minted}{c}
+for (int i = 0; i < cols; i += block_size) 
+  for (int j = 0; j < rows; j += block_size) 
+    for (int bi = 0; bi < block_size; bi++) 
+      for (int bj = 0; bj < block_size; bj++) 
+        TA[i+ bi][j + bj] = A[j + bj][i + bi];
+        \end{minted}
+    \end{code}
+    
+    \columnbreak
+
+    \begin{code}
+        \caption{\label{code:matBlockT3}Matrix transposition with blocks - Third implementation}
+        \begin{minted}{c}
+for (int i = 0; i < rows; i += block_size) 
+  for (int j = 0; j < cols; j += block_size) 
+    for (int bi = 0; bi < block_size; bi++)
+      for (int bj = 0; bj < block_size; bj++) 
+        TA[j + bj][i + bi] = A[i + bi][j + bj];
+        \end{minted}
+    \end{code}
+\end{multicols}
+
+As discussed earlier, maintaining uniformity in the algorithm across both serial and parallel executions serves the purpose of establishing a robust basis for comparing results.\\
+This approach ensures that any variations in performance can be more precisely attributed to the parallelization strategy rather than disparities in algorithmic intricacies.\\
+After numerous tests conducted, the best pragma to perform the parallel task is the one presented in \texttt{Source code~\ref{code:matBlockTPar}}.
+The directive instructs the compiler to parallelize a nested loop with SIMD parallelism, collapsing four levels of loops into a single parallel loop.
+The inclusion of the SIMD clause is particularly significant for its substantial optimization impact, considering the increased number of variables taken into account.\\
+
+\begin{code}
+    \caption{\label{code:matBlockTPar}Matrix transposition with blocks - Third implementation}
+    \begin{minted}{c}
+#pragma omp parallel for simd collapse(4)
+for (int i = 0; i < rows; i += block_size) 
+    for (int j = 0; j < cols; j += block_size) 
+        for (int bi = 0; bi < block_size; bi++) 
+            for (int bj = 0; bj < block_size; bj++) 
+                TA[j + bj][i + bi] = A[i + bi][j + bj];
+    \end{minted}
+\end{code}
+
+The conducted tests center on the parallelization of matrix transposition for both sparse and dense matrices. These experiments were executed across four distinct matrix sizes (1250, 5000, 20000, 80000) with varying thread counts. The analysis incorporates different block sizes derived from matrix divisors, with a particular emphasis on highlighting the most significant results.
+
+\subsection*{Results analysis}
+
+As evident from the graphs, the bandwidth consistently follows the same trend, except for cases where block sizes are exceptionally small. This anomaly is likely due to limitations hindering effective parallelization under such conditions.
+
+%Bandwidth matrix transposition
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 1250
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                1250;1;0.010009;parallel;1.25
+                1250;2;0.006952;parallel;1.80
+                1250;4;0.003689;parallel;3.39
+                1250;8;0.002000;parallel;6.25
+                1250;16;0.001144;parallel;10.93
+                1250;32;0.000639;parallel;19.56
+                1250;64;0.000257;parallel;48.64
+            };
+            \addlegendentryexpanded{1250}
+    
+            % Dimension 5000
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                5000;1;0.260901;parallel;0.77
+                5000;2;0.156423;parallel;1.28
+                5000;4;0.079207;parallel;2.53
+                5000;8;0.047585;parallel;4.20
+                5000;16;0.025896;parallel;7.72
+                5000;32;0.014178;parallel;14.11
+                5000;64;0.008743;parallel;22.88
+            };
+            \addlegendentryexpanded{5000}
+    
+            % Dimension 20000
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                20000;1;8.110962;parallel;0.39
+                20000;2;4.492855;parallel;0.71
+                20000;4;2.441272;parallel;1.31
+                20000;8;1.592682;parallel;2.01
+                20000;16;0.683758;parallel;4.68
+                20000;32;0.405558;parallel;7.89
+                20000;64;0.320059;parallel;10.00
+            };
+            \addlegendentryexpanded{20000}
+    
+            % Dimension 80000
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                80000;1;85.539423;parallel;0.60
+                80000;2;45.656920;parallel;1.12
+                80000;4;22.075226;parallel;2.32
+                80000;8;11.179035;parallel;4.58
+                80000;16;5.974215;parallel;8.57
+                80000;32;3.393203;parallel;15.09
+                80000;64;2.515913;parallel;20.35
+            };
+            \addlegendentryexpanded{80000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Sparse Matrices without blocks}
+        \label{fig:Bandwidth_sparse}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Dimension 1250
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                1250;1;0.017500;parallel;0.71
+                1250;2;0.006868;parallel;1.82
+                1250;4;0.005151;parallel;2.43
+                1250;8;0.002690;parallel;4.65
+                1250;16;0.001519;parallel;8.23
+                1250;32;0.000864;parallel;14.47
+                1250;64;0.000533;parallel;23.45
+            };
+            \addlegendentryexpanded{1250}
+    
+            % Dimension 5000
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                5000;1;0.433587;parallel;0.46
+                5000;2;0.173988;parallel;1.15
+                5000;4;0.091507;parallel;2.19
+                5000;8;0.173496;parallel;1.15
+                5000;16;0.125843;parallel;1.59
+                5000;32;0.015096;parallel;13.25
+                5000;64;0.009048;parallel;22.10
+            };
+            \addlegendentryexpanded{5000}
+    
+            % Dimension 20000
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                20000;1;9.681997;parallel;0.33
+                20000;2;4.898556;parallel;0.65
+                20000;4;2.401035;parallel;1.33
+                20000;8;1.999748;parallel;1.60
+                20000;16;1.293617;parallel;2.47
+                20000;32;0.772922;parallel;4.14
+                20000;64;0.667974;parallel;4.79
+            };
+            \addlegendentryexpanded{20000}
+    
+            % Dimension 80000
+            \addplot table [x=Threads, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads;Elapsed time;Method;Bandwidth
+                80000;1;64.783933;parallel;0.79
+                80000;2;34.668948;parallel;1.48
+                80000;4;18.649299;parallel;2.75
+                80000;8;10.725130;parallel;4.77
+                80000;16;6.443242;parallel;7.95
+                80000;32;4.386200;parallel;11.67
+                80000;64;3.039912;parallel;16.84
+            };
+            \addlegendentryexpanded{80000}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Dense Matrices without blocks}
+        \label{fig:Bandwidth_dense}
+    \end{subfigure}
+\end{figure}
+
+%Matrix with block 1250
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Block 2
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.018664;2;parallel;0.67
+                1250;2;0.010941;2;parallel;1.14
+                1250;4;0.005697;2;parallel;2.19
+                1250;8;0.003067;2;parallel;4.08
+                1250;16;0.001679;2;parallel;7.44
+                1250;32;0.000933;2;parallel;13.40
+                1250;64;0.000438;2;parallel;28.54
+            };
+            \addlegendentryexpanded{2}
+    
+            % Block 5
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.018776;5;parallel;0.67
+                1250;2;0.011308;5;parallel;1.11
+                1250;4;0.005812;5;parallel;2.15
+                1250;8;0.003121;5;parallel;4.01
+                1250;16;0.001721;5;parallel;7.26
+                1250;32;0.000930;5;parallel;13.44
+                1250;64;0.000428;5;parallel;29.21
+            };
+            \addlegendentryexpanded{5}
+    
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.017586;10;parallel;0.71
+                1250;2;0.010183;10;parallel;1.23
+                1250;4;0.005250;10;parallel;2.38
+                1250;8;0.002841;10;parallel;4.40
+                1250;16;0.001562;10;parallel;8.00
+                1250;32;0.000845;10;parallel;14.79
+                1250;64;0.000387;10;parallel;32.30
+            };
+            \addlegendentryexpanded{10}
+    
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.016939;25;parallel;0.74
+                1250;2;0.009784;25;parallel;1.28
+                1250;4;0.004976;25;parallel;2.51
+                1250;8;0.002656;25;parallel;4.71
+                1250;16;0.001471;25;parallel;8.50
+                1250;32;0.000799;25;parallel;15.64
+                1250;64;0.000340;25;parallel;36.76
+            };
+            \addlegendentryexpanded{25}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Sparse Matrix size 1250 with blocks}
+        \label{fig:Bandwidth_sparse_1250}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Block 2
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.019682;2;parallel;0.64
+                1250;2;0.048768;2;parallel;0.26
+                1250;4;0.026257;2;parallel;0.48
+                1250;8;0.037172;2;parallel;0.34
+                1250;16;0.025995;2;parallel;0.48
+                1250;32;0.001333;2;parallel;9.38
+                1250;64;0.000868;2;parallel;14.40
+            };
+            \addlegendentryexpanded{2}
+    
+            % Block 5
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.021174;5;parallel;0.59
+                1250;2;0.011052;5;parallel;1.13
+                1250;4;0.006578;5;parallel;1.90
+                1250;8;0.003654;5;parallel;3.42
+                1250;16;0.002075;5;parallel;6.02
+                1250;32;0.001138;5;parallel;10.98
+                1250;64;0.000726;5;parallel;17.22
+            };
+            \addlegendentryexpanded{5}
+    
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.019263;10;parallel;0.65
+                1250;2;0.014690;10;parallel;0.85
+                1250;4;0.008823;10;parallel;1.42
+                1250;8;0.003007;10;parallel;4.16
+                1250;16;0.001684;10;parallel;7.42
+                1250;32;0.000949;10;parallel;13.17
+                1250;64;0.000532;10;parallel;23.50
+            };
+            \addlegendentryexpanded{10}
+    
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                1250;1;0.018199;25;parallel;0.69
+                1250;2;0.124963;25;parallel;0.10
+                1250;4;0.018412;25;parallel;0.68
+                1250;8;0.014811;25;parallel;0.84
+                1250;16;0.039002;25;parallel;0.32
+                1250;32;0.026001;25;parallel;0.48
+                1250;64;0.025998;25;parallel;0.48
+            };
+            \addlegendentryexpanded{25}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Dense Matrix size 1250 with blocks}
+        \label{fig:Bandwidth_dense_1250}
+    \end{subfigure}
+\end{figure}
+
+%Matrix with block 5000
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Block 2
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.360325;2;parallel;0.56
+                5000;2;0.169967;2;parallel;1.18
+                5000;4;0.098724;2;parallel;2.03
+                5000;8;0.058833;2;parallel;3.40
+                5000;16;0.037768;2;parallel;5.30
+                5000;32;0.024104;2;parallel;8.30
+                5000;64;0.015093;2;parallel;13.25
+            };
+            \addlegendentryexpanded{2}
+    
+            % Block 4
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.319019;4;parallel;0.63
+                5000;2;0.152391;4;parallel;1.31
+                5000;4;0.090000;4;parallel;2.22
+                5000;8;0.051609;4;parallel;3.88
+                5000;16;0.033073;4;parallel;6.05
+                5000;32;0.021412;4;parallel;9.34
+                5000;64;0.013373;4;parallel;14.96
+            };
+            \addlegendentryexpanded{4}
+
+            % Block 5
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.291112;5;parallel;0.69
+                5000;2;0.144141;5;parallel;1.39
+                5000;4;0.097038;5;parallel;2.06
+                5000;8;0.049314;5;parallel;4.06
+                5000;16;0.040958;5;parallel;4.88
+                5000;32;0.019607;5;parallel;10.20
+                5000;64;0.013035;5;parallel;15.34
+            };
+            \addlegendentryexpanded{5}
+
+            % Block 8
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.337150;8;parallel;0.59
+                5000;2;0.144531;8;parallel;1.38
+                5000;4;0.083707;8;parallel;2.39
+                5000;8;0.047423;8;parallel;4.22
+                5000;16;0.031350;8;parallel;6.38
+                5000;32;0.019359;8;parallel;10.33
+                5000;64;0.012436;8;parallel;16.08
+            };
+            \addlegendentryexpanded{8}
+    
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.299955;10;parallel;0.67
+                5000;2;0.144447;10;parallel;1.38
+                5000;4;0.081950;10;parallel;2.44
+                5000;8;0.044875;10;parallel;4.46
+                5000;16;0.028541;10;parallel;7.01
+                5000;32;0.018721;10;parallel;10.68
+                5000;64;0.012235;10;parallel;16.35
+            };
+            \addlegendentryexpanded{10}
+            
+            % Block 20
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.287458;20;parallel;0.70
+                5000;2;0.137705;20;parallel;1.45
+                5000;4;0.078474;20;parallel;2.55
+                5000;8;0.044221;20;parallel;4.52
+                5000;16;0.027755;20;parallel;7.21
+                5000;32;0.018097;20;parallel;11.05
+                5000;64;0.011890;20;parallel;16.82
+            };
+            \addlegendentryexpanded{20}
+
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.285924;25;parallel;0.70
+                5000;2;0.136301;25;parallel;1.47
+                5000;4;0.078654;25;parallel;2.54
+                5000;8;0.045522;25;parallel;4.39
+                5000;16;0.028320;25;parallel;7.06
+                5000;32;0.018566;25;parallel;10.77
+                5000;64;0.012615;25;parallel;15.85
+            };
+            \addlegendentryexpanded{25}
+
+            % Block 40
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.284825;40;parallel;0.70
+                5000;2;0.135421;40;parallel;1.48
+                5000;4;0.077688;40;parallel;2.57
+                5000;8;0.043195;40;parallel;4.63
+                5000;16;0.026933;40;parallel;7.43
+                5000;32;0.017973;40;parallel;11.13
+                5000;64;0.011768;40;parallel;17.00
+            };
+            \addlegendentryexpanded{40}
+
+            % Block 50
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.273486;50;parallel;0.73
+                5000;2;0.136759;50;parallel;1.46
+                5000;4;0.078915;50;parallel;2.53
+                5000;8;0.042948;50;parallel;4.66
+                5000;16;0.027090;50;parallel;7.38
+                5000;32;0.017537;50;parallel;11.40
+                5000;64;0.011916;50;parallel;16.78
+            };
+            \addlegendentryexpanded{50}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Sparse Matrix size 5000 with blocks}
+        \label{fig:Bandwidth_sparse_5000}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Block 2
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.518230;2;parallel;0.39
+5000;2;0.290385;2;parallel;0.69
+5000;4;0.440227;2;parallel;0.45
+5000;8;0.063671;2;parallel;3.14
+5000;16;0.058404;2;parallel;3.42
+5000;32;0.045742;2;parallel;4.37
+5000;64;0.016808;2;parallel;11.90
+            };
+            \addlegendentryexpanded{2}
+    
+            % Block 4
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.353036;4;parallel;0.57
+5000;2;0.278296;4;parallel;0.72
+5000;4;0.130430;4;parallel;1.53
+5000;8;0.105716;4;parallel;1.89
+5000;16;0.048397;4;parallel;4.13
+5000;32;0.023896;4;parallel;8.37
+5000;64;0.015581;4;parallel;12.84
+            };
+            \addlegendentryexpanded{4}
+
+            % Block 5
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.377730;5;parallel;0.53
+5000;2;0.270309;5;parallel;0.74
+5000;4;0.119966;5;parallel;1.67
+5000;8;0.068631;5;parallel;2.91
+5000;16;0.034004;5;parallel;5.88
+5000;32;0.034772;5;parallel;5.75
+5000;64;0.066399;5;parallel;3.01
+            };
+            \addlegendentryexpanded{5}
+
+            % Block 8
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.383030;8;parallel;0.52
+5000;2;0.149874;8;parallel;1.33
+5000;4;0.340487;8;parallel;0.59
+5000;8;0.101525;8;parallel;1.97
+5000;16;0.033010;8;parallel;6.06
+5000;32;0.021877;8;parallel;9.14
+5000;64;0.014036;8;parallel;14.25
+            };
+            \addlegendentryexpanded{8}
+    
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.400147;10;parallel;0.50
+5000;2;0.191515;10;parallel;1.04
+5000;4;0.136268;10;parallel;1.47
+5000;8;0.055374;10;parallel;3.61
+5000;16;0.028766;10;parallel;6.95
+5000;32;0.019454;10;parallel;10.28
+5000;64;0.013950;10;parallel;14.34
+            };
+            \addlegendentryexpanded{10}
+            
+            % Block 20
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.556238;20;parallel;0.36
+5000;2;0.229751;20;parallel;0.87
+5000;4;0.103688;20;parallel;1.93
+5000;8;0.051024;20;parallel;3.92
+5000;16;0.030945;20;parallel;6.46
+5000;32;0.019981;20;parallel;10.01
+5000;64;0.014152;20;parallel;14.13
+            };
+            \addlegendentryexpanded{20}
+
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.404520;25;parallel;0.49
+5000;2;0.295320;25;parallel;0.68
+5000;4;0.089847;25;parallel;2.23
+5000;8;0.104523;25;parallel;1.91
+5000;16;0.031242;25;parallel;6.40
+5000;32;0.020242;25;parallel;9.88
+5000;64;0.079636;25;parallel;2.51
+            };
+            \addlegendentryexpanded{25}
+
+            % Block 40
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.282205;40;parallel;0.71
+5000;2;0.250471;40;parallel;0.80
+5000;4;0.147892;40;parallel;1.35
+5000;8;0.048987;40;parallel;4.08
+5000;16;0.154729;40;parallel;1.29
+5000;32;0.072034;40;parallel;2.78
+5000;64;0.018004;40;parallel;11.11
+            };
+            \addlegendentryexpanded{40}
+
+            % Block 50
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                5000;1;0.274277;50;parallel;0.73
+5000;2;0.257894;50;parallel;0.78
+5000;4;0.194380;50;parallel;1.03
+5000;8;0.156062;50;parallel;1.28
+5000;16;0.048762;50;parallel;4.10
+5000;32;0.019673;50;parallel;10.17
+5000;64;0.013436;50;parallel;14.89
+            };
+            \addlegendentryexpanded{50}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Dense Matrix size 5000 with blocks}
+        \label{fig:Bandwidth_dense_5000}
+    \end{subfigure}
+\end{figure}
+
+%Matrix with block 20000
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+
+            % Block 5
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.813042;5;parallel;0.55
+20000;2;3.353081;5;parallel;0.95
+20000;4;1.999112;5;parallel;1.60
+20000;8;1.014527;5;parallel;3.15
+20000;16;0.740934;5;parallel;4.32
+20000;32;0.520480;5;parallel;6.15
+20000;64;0.477414;5;parallel;6.70
+            };
+            \addlegendentryexpanded{5}
+    
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.443924;10;parallel;0.59
+20000;2;2.960360;10;parallel;1.08
+20000;4;2.079909;10;parallel;1.54
+20000;8;0.942097;10;parallel;3.40
+20000;16;0.731302;10;parallel;4.38
+20000;32;0.468372;10;parallel;6.83
+20000;64;0.374627;10;parallel;8.54
+            };
+            \addlegendentryexpanded{10}
+
+            % Block 20
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.104737;20;parallel;0.63
+20000;2;2.588877;20;parallel;1.24
+20000;4;1.320543;20;parallel;2.42
+20000;8;0.931958;20;parallel;3.43
+20000;16;0.678669;20;parallel;4.72
+20000;32;0.347216;20;parallel;9.22
+20000;64;0.217680;20;parallel;14.70
+            };
+            \addlegendentryexpanded{20}
+
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;4.809910;25;parallel;0.67
+20000;2;2.506146;25;parallel;1.28
+20000;4;1.401067;25;parallel;2.28
+20000;8;1.030982;25;parallel;3.10
+20000;16;0.735555;25;parallel;4.35
+20000;32;0.348885;25;parallel;9.17
+20000;64;0.373592;25;parallel;8.57
+            };
+            \addlegendentryexpanded{25}
+
+            % Block 32
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;4.636197;32;parallel;0.69
+20000;2;2.918707;32;parallel;1.10
+20000;4;1.379940;32;parallel;2.32
+20000;8;0.808685;32;parallel;3.96
+20000;16;0.539725;32;parallel;5.93
+20000;32;0.267984;32;parallel;11.94
+20000;64;0.215006;32;parallel;14.88
+            };
+            \addlegendentryexpanded{32}
+
+            % Block 40
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.061957;40;parallel;0.63
+20000;2;2.661414;40;parallel;1.20
+20000;4;1.649334;40;parallel;1.94
+20000;8;1.181066;40;parallel;2.71
+20000;16;0.759044;40;parallel;4.22
+20000;32;0.303742;40;parallel;10.54
+20000;64;0.349242;40;parallel;9.16
+            };
+            \addlegendentryexpanded{40}
+
+            % Block 50
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.505013;50;parallel;0.58
+20000;2;2.661379;50;parallel;1.20
+20000;4;1.421042;50;parallel;2.25
+20000;8;0.986145;50;parallel;3.24
+20000;16;0.527507;50;parallel;6.07
+20000;32;0.260808;50;parallel;12.27
+20000;64;0.208666;50;parallel;15.34
+            };
+            \addlegendentryexpanded{50}
+
+            % Block 80
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.033359;80;parallel;0.64
+20000;2;2.421512;80;parallel;1.32
+20000;4;1.325081;80;parallel;2.41
+20000;8;0.752943;80;parallel;4.25
+20000;16;0.526019;80;parallel;6.08
+20000;32;0.430063;80;parallel;7.44
+20000;64;0.284120;80;parallel;11.26
+            };
+            \addlegendentryexpanded{80}
+
+            % Block 100
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.207481;100;parallel;0.61
+20000;2;2.647359;100;parallel;1.21
+20000;4;1.448682;100;parallel;2.21
+20000;8;0.894265;100;parallel;3.58
+20000;16;0.538404;100;parallel;5.94
+20000;32;0.248520;100;parallel;12.88
+20000;64;0.189082;100;parallel;16.92
+            };
+            \addlegendentryexpanded{100}
+
+            % Block 125
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.238485;125;parallel;0.61
+20000;2;2.695413;125;parallel;1.19
+20000;4;1.386919;125;parallel;2.31
+20000;8;0.768736;125;parallel;4.16
+20000;16;0.553867;125;parallel;5.78
+20000;32;0.366764;125;parallel;8.72
+20000;64;0.217887;125;parallel;14.69
+            };
+            \addlegendentryexpanded{125}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Sparse Matrix size 20000 with blocks}
+        \label{fig:Bandwidth_sparse_5000}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Block 5
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.665154;5;parallel;0.48
+20000;2;3.561881;5;parallel;0.90
+20000;4;2.320749;5;parallel;1.38
+20000;8;1.255039;5;parallel;2.55
+20000;16;0.766978;5;parallel;4.17
+20000;32;0.760997;5;parallel;4.21
+20000;64;0.633524;5;parallel;5.05
+            };
+            \addlegendentryexpanded{5}
+    
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.124798;10;parallel;0.52
+20000;2;4.369416;10;parallel;0.73
+20000;4;2.143307;10;parallel;1.49
+20000;8;1.186429;10;parallel;2.70
+20000;16;0.619868;10;parallel;5.16
+20000;32;0.591903;10;parallel;5.41
+20000;64;0.495371;10;parallel;6.46
+            };
+            \addlegendentryexpanded{10}
+
+            % Block 20
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.816721;20;parallel;0.55
+20000;2;4.266933;20;parallel;0.75
+20000;4;2.278773;20;parallel;1.40
+20000;8;1.273513;20;parallel;2.51
+20000;16;0.824100;20;parallel;3.88
+20000;32;0.674602;20;parallel;4.74
+20000;64;0.482054;20;parallel;6.64
+            };
+            \addlegendentryexpanded{20}
+
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;5.358290;25;parallel;0.60
+20000;2;3.251399;25;parallel;0.98
+20000;4;1.881205;25;parallel;1.70
+20000;8;1.125184;25;parallel;2.84
+20000;16;0.776828;25;parallel;4.12
+20000;32;0.372883;25;parallel;8.58
+20000;64;0.348576;25;parallel;9.18
+            };
+            \addlegendentryexpanded{25}
+
+            % Block 32
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.376153;32;parallel;0.50
+20000;2;3.183585;32;parallel;1.01
+20000;4;1.882940;32;parallel;1.70
+20000;8;1.163398;32;parallel;2.75
+20000;16;0.793272;32;parallel;4.03
+20000;32;0.661461;32;parallel;4.84
+20000;64;0.694860;32;parallel;4.61
+            };
+            \addlegendentryexpanded{32}
+
+            % Block 40
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.445420;40;parallel;0.50
+20000;2;3.257840;40;parallel;0.98
+20000;4;1.900244;40;parallel;1.68
+20000;8;1.105216;40;parallel;2.90
+20000;16;0.756685;40;parallel;4.23
+20000;32;0.909831;40;parallel;3.52
+20000;64;0.710292;40;parallel;4.51
+            };
+            \addlegendentryexpanded{40}
+
+            % Block 50
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.029400;50;parallel;0.53
+20000;2;4.058818;50;parallel;0.79
+20000;4;2.071816;50;parallel;1.54
+20000;8;1.167584;50;parallel;2.74
+20000;16;0.710564;50;parallel;4.50
+20000;32;0.769022;50;parallel;4.16
+20000;64;0.410174;50;parallel;7.80
+            };
+            \addlegendentryexpanded{50}
+
+            % Block 80
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.036102;80;parallel;0.53
+20000;2;3.172922;80;parallel;1.01
+20000;4;1.832992;80;parallel;1.75
+20000;8;1.137314;80;parallel;2.81
+20000;16;0.777358;80;parallel;4.12
+20000;32;0.476366;80;parallel;6.72
+20000;64;0.431910;80;parallel;7.41
+            };
+            \addlegendentryexpanded{80}
+
+            % Block 100
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.337020;100;parallel;0.50
+20000;2;3.926832;100;parallel;0.81
+20000;4;1.918524;100;parallel;1.67
+20000;8;1.185923;100;parallel;2.70
+20000;16;1.023762;100;parallel;3.13
+20000;32;0.655990;100;parallel;4.88
+20000;64;0.418436;100;parallel;7.65
+            };
+            \addlegendentryexpanded{100}
+
+            % Block 125
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                20000;1;6.740321;125;parallel;0.47
+20000;2;2.877253;125;parallel;1.11
+20000;4;1.744482;125;parallel;1.83
+20000;8;1.206589;125;parallel;2.65
+20000;16;0.864110;125;parallel;3.70
+20000;32;0.380879;125;parallel;8.40
+20000;64;0.549317;125;parallel;5.83
+            };
+            \addlegendentryexpanded{125}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Dense Matrix size 20000 with blocks}
+        \label{fig:Bandwidth_dense_5000}
+    \end{subfigure}
+\end{figure}
+
+%Matrix with block 80000
+\begin{figure}[h!tb]
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;25.867548;10;parallel;1.98
+80000;2;13.712411;10;parallel;3.73
+80000;4;8.103431;10;parallel;6.32
+80000;8;4.781023;10;parallel;10.71
+80000;16;2.898262;10;parallel;17.67
+80000;32;1.891886;10;parallel;27.06
+80000;64;1.441960;10;parallel;35.51
+            };
+            \addlegendentryexpanded{10}
+
+            % Block 20
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;26.458383;20;parallel;1.94
+80000;2;12.875376;20;parallel;3.98
+80000;4;7.419222;20;parallel;6.90
+80000;8;4.115880;20;parallel;12.44
+80000;16;2.394894;20;parallel;21.38
+80000;32;1.697034;20;parallel;30.17
+80000;64;1.367878;20;parallel;37.43
+            };
+            \addlegendentryexpanded{20}
+
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;24.639243;25;parallel;2.08
+80000;2;12.540614;25;parallel;4.08
+80000;4;6.686029;25;parallel;7.66
+80000;8;3.993877;25;parallel;12.82
+80000;16;2.383877;25;parallel;21.48
+80000;32;1.581059;25;parallel;32.38
+80000;64;1.304829;25;parallel;39.24
+            };
+            \addlegendentryexpanded{25}
+
+            % Block 50
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;24.831801;50;parallel;2.06
+80000;2;12.989163;50;parallel;3.94
+80000;4;7.452181;50;parallel;6.87
+80000;8;3.987642;50;parallel;12.84
+80000;16;2.241603;50;parallel;22.84
+80000;32;1.542489;50;parallel;33.19
+80000;64;1.279179;50;parallel;40.03
+            };
+            \addlegendentryexpanded{50}
+
+            % Block 80
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;24.575361;80;parallel;2.08
+80000;2;12.396416;80;parallel;4.13
+80000;4;6.812444;80;parallel;7.52
+80000;8;3.696447;80;parallel;13.85
+80000;16;2.297165;80;parallel;22.29
+80000;32;1.554230;80;parallel;32.94
+80000;64;1.233264;80;parallel;41.52
+            };
+            \addlegendentryexpanded{80}
+
+            % Block 100
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;24.308308;100;parallel;2.11
+80000;2;12.413066;100;parallel;4.12
+80000;4;6.949182;100;parallel;7.37
+80000;8;3.701451;100;parallel;13.83
+80000;16;2.174578;100;parallel;23.54
+80000;32;1.584894;100;parallel;32.30
+80000;64;1.308400;100;parallel;39.13
+            };
+            \addlegendentryexpanded{100}
+
+            % Block 125
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;24.229997;125;parallel;2.11
+80000;2;14.224026;125;parallel;3.60
+80000;4;6.730232;125;parallel;7.61
+80000;8;3.512237;125;parallel;14.58
+80000;16;2.225645;125;parallel;23.00
+80000;32;1.428086;125;parallel;35.85
+80000;64;1.182088;125;parallel;43.31
+            };
+            \addlegendentryexpanded{125}
+
+            % Block 160
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;24.792960;160;parallel;2.07
+80000;2;12.546210;160;parallel;4.08
+80000;4;6.773689;160;parallel;7.56
+80000;8;3.680523;160;parallel;13.91
+80000;16;2.207396;160;parallel;23.19
+80000;32;1.586569;160;parallel;32.27
+80000;64;1.256952;160;parallel;40.73
+            };
+            \addlegendentryexpanded{160}
+
+            % Block 200
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;25.029694;200;parallel;2.05
+80000;2;14.299339;200;parallel;3.58
+80000;4;6.629388;200;parallel;7.72
+80000;8;3.469878;200;parallel;14.76
+80000;16;2.148328;200;parallel;23.83
+80000;32;1.451917;200;parallel;35.26
+80000;64;1.200816;200;parallel;42.64
+            };
+            \addlegendentryexpanded{200}
+
+            % Block 250
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;23.981528;250;parallel;2.13
+80000;2;12.515270;250;parallel;4.09
+80000;4;6.666367;250;parallel;7.68
+80000;8;3.873943;250;parallel;13.22
+80000;16;2.125006;250;parallel;24.09
+80000;32;1.473438;250;parallel;34.75
+80000;64;1.149500;250;parallel;44.54
+            };
+            \addlegendentryexpanded{200}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Sparse Matrix size 80000 with blocks}
+        \label{fig:Bandwidth_sparse_5000}
+    \end{subfigure}%
+    \begin{subfigure}{0.49\textwidth}
+        \begin{tikzpicture}
+            \begin{axis}[
+                xlabel={Threads},
+                ylabel={Bandwidth [GB/s]},
+                legend pos=north west,
+                xmode=log,
+                xtick={1, 2, 4, 8, 16, 32, 64},
+                log ticks with fixed point,
+                width=1\textwidth,
+                grid=both,
+                grid style={line width=.1pt, draw=gray!10},
+            ]
+    
+            % Block 10
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;29.699641;10;parallel;1.72
+80000;2;14.746190;10;parallel;3.47
+80000;4;8.602450;10;parallel;5.95
+80000;8;6.277213;10;parallel;8.16
+80000;16;2.715492;10;parallel;18.85
+80000;32;1.998732;10;parallel;25.62
+80000;64;1.483705;10;parallel;34.51
+            };
+            \addlegendentryexpanded{10}
+
+            % Block 20
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;27.166813;20;parallel;1.88
+80000;2;13.432346;20;parallel;3.81
+80000;4;6.779976;20;parallel;7.55
+80000;8;5.164985;20;parallel;9.91
+80000;16;2.571332;20;parallel;19.91
+80000;32;1.843750;20;parallel;27.77
+80000;64;1.435743;20;parallel;35.66
+            };
+            \addlegendentryexpanded{20}
+
+            % Block 25
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;26.683290;25;parallel;1.92
+80000;2;14.625320;25;parallel;3.50
+80000;4;7.565847;25;parallel;6.77
+80000;8;3.979464;25;parallel;12.87
+80000;16;2.748897;25;parallel;18.63
+80000;32;1.954845;25;parallel;26.19
+80000;64;1.457589;25;parallel;35.13
+            };
+            \addlegendentryexpanded{25}
+
+            % Block 50
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;29.137083;50;parallel;1.76
+80000;2;17.422473;50;parallel;2.94
+80000;4;8.090395;50;parallel;6.33
+80000;8;4.315211;50;parallel;11.87
+80000;16;2.203523;50;parallel;23.24
+80000;32;1.545696;50;parallel;33.12
+80000;64;1.270163;50;parallel;40.31
+            };
+            \addlegendentryexpanded{50}
+
+            % Block 80
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;28.052012;80;parallel;1.83
+80000;2;13.482402;80;parallel;3.80
+80000;4;6.729766;80;parallel;7.61
+80000;8;4.172459;80;parallel;12.27
+80000;16;2.567997;80;parallel;19.94
+80000;32;1.579203;80;parallel;32.42
+80000;64;1.449813;80;parallel;35.31
+            };
+            \addlegendentryexpanded{80}
+
+            % Block 100
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;26.806523;100;parallel;1.91
+80000;2;13.590361;100;parallel;3.77
+80000;4;6.925518;100;parallel;7.39
+80000;8;5.171336;100;parallel;9.90
+80000;16;2.283088;100;parallel;22.43
+80000;32;1.629116;100;parallel;31.43
+80000;64;1.410981;100;parallel;36.29
+            };
+            \addlegendentryexpanded{100}
+
+            % Block 125
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;26.742993;125;parallel;1.91
+80000;2;15.127624;125;parallel;3.38
+80000;4;7.399141;125;parallel;6.92
+80000;8;3.737136;125;parallel;13.70
+80000;16;2.195440;125;parallel;23.32
+80000;32;1.674881;125;parallel;30.57
+80000;64;1.427479;125;parallel;35.87
+            };
+            \addlegendentryexpanded{125}
+
+            % Block 160
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;27.078916;160;parallel;1.89
+80000;2;13.901188;160;parallel;3.68
+80000;4;6.915303;160;parallel;7.40
+80000;8;3.845176;160;parallel;13.32
+80000;16;2.286165;160;parallel;22.40
+80000;32;1.847168;160;parallel;27.72
+80000;64;1.455219;160;parallel;35.18
+            };
+            \addlegendentryexpanded{160}
+
+            % Block 200
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;25.489561;200;parallel;2.01
+80000;2;13.234575;200;parallel;3.87
+80000;4;7.165992;200;parallel;7.14
+80000;8;3.509060;200;parallel;14.59
+80000;16;2.444056;200;parallel;20.95
+80000;32;1.782542;200;parallel;28.72
+80000;64;1.131100;200;parallel;45.27
+            };
+            \addlegendentryexpanded{200}
+
+            % Block 250
+            \addplot table [x=Threads_num, y=Bandwidth, col sep=semicolon] {
+                Dimension;Threads_num;Elapsed time;Block size.Method;Column1;Bandwidth
+                80000;1;26.440076;250;parallel;1.94
+80000;2;13.427979;250;parallel;3.81
+80000;4;8.659209;250;parallel;5.91
+80000;8;3.467006;250;parallel;14.77
+80000;16;2.199147;250;parallel;23.28
+80000;32;1.624122;250;parallel;31.52
+80000;64;1.112613;250;parallel;46.02
+            };
+            \addlegendentryexpanded{200}
+
+            \end{axis}
+        \end{tikzpicture}
+        \caption*{Bandwidth for Dense Matrix size 80000 with blocks}
+        \label{fig:Bandwidth_dense_5000}
+    \end{subfigure}
+\end{figure}
+
+\clearpage
+\section{Conclusion}
+As anticipated, the algorithms demonstrate improved performance with an increasing number of accessible CPUs. Likewise, the speedup corresponds to a faster completion of calculations with a higher CPU count. However, efficiency is erratic due to the non-linear scalability of the algorithms. To address this issue, potential solutions include rethinking the approach to parallelization or considering alternative algorithms.
+\\
+\nocite{*}
+\printbibliography
+
+\end{document}
